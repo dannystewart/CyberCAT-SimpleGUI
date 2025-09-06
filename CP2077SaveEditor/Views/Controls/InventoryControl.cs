@@ -85,6 +85,143 @@ namespace CP2077SaveEditor.Views.Controls
             MessageBox.Show("All item flags cleared.");
         }
 
+        /// <summary>
+        /// Removes duplicate items from inventories. Duplicates are identified by matching ItemId.ResolvedText.
+        /// Keeps the first occurrence of each unique item and removes all subsequent duplicates.
+        /// </summary>
+        private void RemoveDuplicates(object sender, EventArgs e)
+        {
+            // Get the currently selected inventory
+            var currentContainerId = containersListBox.SelectedItem?.ToString();
+            if (string.IsNullOrEmpty(currentContainerId))
+            {
+                MessageBox.Show("Please select an inventory first.", "No Inventory Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Convert display name back to ID if needed
+            if (_inventoryNames.Values.Contains(currentContainerId))
+            {
+                currentContainerId = _inventoryNames.FirstOrDefault(x => x.Value == currentContainerId).Key.ToString();
+            }
+
+            // Get the current inventory name for display
+            var currentInventoryName = _inventoryNames.ContainsKey(ulong.Parse(currentContainerId))
+                ? _inventoryNames[ulong.Parse(currentContainerId)]
+                : $"Inventory {currentContainerId}";
+
+            var result = MessageBox.Show($"Choose duplicate removal scope:\n\nYes - Remove duplicates from ALL inventories\nNo - Remove duplicates from {currentInventoryName} only\nCancel - Abort",
+                "Remove Duplicates", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+
+            if (result == DialogResult.Cancel)
+            {
+                return;
+            }
+
+            var removeFromAll = result == DialogResult.Yes;
+            var totalRemoved = 0;
+            var duplicatesFound = new Dictionary<string, int>();
+            var inventoriesProcessed = new List<string>();
+
+            var inventoriesToProcess = removeFromAll
+                ? _parentForm.ActiveSaveFile.GetInventoriesContainer().SubInventories
+                : new List<SubInventory> {
+                    _parentForm.ActiveSaveFile.GetInventory(ulong.Parse(currentContainerId))
+                  }.Where(x => x != null);
+
+            foreach (SubInventory inventory in inventoriesToProcess)
+            {
+                if (inventory == null) continue;
+
+                var inventoryName = _inventoryNames.ContainsKey(inventory.InventoryId)
+                    ? _inventoryNames[inventory.InventoryId]
+                    : $"Inventory {inventory.InventoryId:X}";
+
+                var itemsToRemove = new List<ItemData>();
+                var seenItems = new HashSet<string>();
+
+                foreach (ItemData item in inventory.Items)
+                {
+                    var itemId = item.ItemInfo.ItemId.Id.ResolvedText;
+
+                    if (string.IsNullOrEmpty(itemId))
+                    {
+                        continue; // Skip items without valid IDs
+                    }
+
+                    if (seenItems.Contains(itemId))
+                    {
+                        // This is a duplicate, mark for removal
+                        itemsToRemove.Add(item);
+                        totalRemoved++;
+
+                        if (duplicatesFound.ContainsKey(itemId))
+                        {
+                            duplicatesFound[itemId]++;
+                        }
+                        else
+                        {
+                            duplicatesFound[itemId] = 2; // First duplicate found
+                        }
+                    }
+                    else
+                    {
+                        seenItems.Add(itemId);
+                    }
+                }
+
+                // Remove the duplicate items
+                foreach (var itemToRemove in itemsToRemove)
+                {
+                    inventory.Items.Remove(itemToRemove);
+                }
+
+                if (itemsToRemove.Count > 0)
+                {
+                    inventoriesProcessed.Add($"{inventoryName}: {itemsToRemove.Count} duplicates removed");
+                }
+            }
+
+            // Show results
+            var scope = removeFromAll ? "all inventories" : $"{currentInventoryName.ToLower()} only";
+            var message = $"Duplicate removal complete!\n\nScope: {scope}\nTotal duplicates removed: {totalRemoved}";
+
+            if (duplicatesFound.Count > 0)
+            {
+                message += $"\n\nItems with duplicates found: {duplicatesFound.Count}";
+                if (duplicatesFound.Count <= 15) // Show details for reasonable numbers
+                {
+                    message += "\n\nDuplicate items:";
+                    foreach (var kvp in duplicatesFound.OrderByDescending(x => x.Value))
+                    {
+                        message += $"\n• {kvp.Key} ({kvp.Value} copies)";
+                    }
+                }
+                else
+                {
+                    message += $"\n\nTop 10 most duplicated items:";
+                    foreach (var kvp in duplicatesFound.OrderByDescending(x => x.Value).Take(10))
+                    {
+                        message += $"\n• {kvp.Key} ({kvp.Value} copies)";
+                    }
+                }
+            }
+
+            if (inventoriesProcessed.Count > 0)
+            {
+                message += "\n\nInventories processed:";
+                foreach (var inv in inventoriesProcessed)
+                {
+                    message += $"\n• {inv}";
+                }
+            }
+
+            MessageBox.Show(message, "Duplicate Removal Results", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+            // Refresh the inventory display
+            RefreshInventory();
+        }
+
         private void debloatButton_Click(object sender, EventArgs e)
         {
             if (MessageBox.Show("This process will remove redundant data from your save. Just in case, it's recommended that you back up your save before continuing. Continue?", "Notice", MessageBoxButtons.YesNo) != DialogResult.Yes)
@@ -419,6 +556,9 @@ namespace CP2077SaveEditor.Views.Controls
                 {
                     contextMenu.Items.Add("Delete", null, DeleteInventoryItem).Tag = hitTest.Item;
                 }
+
+                var removeDuplicatesItem = contextMenu.Items.Add("Remove Duplicates");
+                removeDuplicatesItem.Click += RemoveDuplicates;
 
                 contextMenu.Show(Cursor.Position);
             }
