@@ -86,7 +86,65 @@ namespace CP2077SaveEditor.Views.Controls
         }
 
         /// <summary>
-        /// Removes duplicate items from inventories. Duplicates are identified by matching ItemId.ResolvedText.
+        /// Checks if an item is safe to consider for duplicate removal
+        /// </summary>
+        private bool IsSafeToRemoveDuplicates(ItemData item)
+        {
+            var itemId = item.ItemInfo.ItemId.Id.ResolvedText;
+
+            if (string.IsNullOrEmpty(itemId))
+                return false;
+
+            // Currently only clothing items are considered safe (for wardrobe cleanup)
+            return itemId.StartsWith("Items.Formal") ||
+                   itemId.StartsWith("Items.Casual") ||
+                   itemId.StartsWith("Items.Boots") ||
+                   itemId.StartsWith("Items.Jacket") ||
+                   itemId.StartsWith("Items.Pants") ||
+                   itemId.StartsWith("Items.Shirt") ||
+                   itemId.StartsWith("Items.Shoes") ||
+                   itemId.StartsWith("Items.Skirt") ||
+                   itemId.StartsWith("Items.Dress") ||
+                   itemId.StartsWith("Items.Hat") ||
+                   itemId.StartsWith("Items.Glasses") ||
+                   itemId.StartsWith("Items.Mask") ||
+                   itemId.StartsWith("Items.Vest") ||
+                   itemId.StartsWith("Items.Shorts") ||
+                   itemId.StartsWith("Items.Sweater") ||
+                   itemId.StartsWith("Items.Tank") ||
+                   itemId.StartsWith("Items.Top") ||
+                   itemId.StartsWith("Items.Underwear") ||
+                   itemId.StartsWith("Items.Bra") ||
+                   itemId.StartsWith("Items.Panties");
+        }
+
+        /// <summary>
+        /// Items are considered duplicates if they have the same base item, quality level, and mods.
+        /// </summary>
+        private string GetItemUniqueKey(ItemData item)
+        {
+            var key = item.ItemInfo.ItemId.Id.ResolvedText;
+
+            // Add quality information if available (this is what determines legendary vs common)
+            if (item.ItemAdditionalInfo != null)
+            {
+                key += $"|LootPool:{item.ItemAdditionalInfo.LootItemPoolId}";
+                key += $"|Level:{item.ItemAdditionalInfo.RequiredLevel}";
+            }
+
+            // Add item structure information (affects how item behaves)
+            key += $"|Structure:{item.ItemInfo.ItemStructure}";
+
+            // Add flags (quest items, etc. - these matter for functionality)
+            key += $"|Flags:{item.Flags}";
+
+            // Add quantity for stackable items (different quantities are different items)
+            key += $"|Qty:{item.Quantity}";
+
+            return key;
+        }
+
+        /// <summary>
         /// Keeps the first occurrence of each unique item and removes all subsequent duplicates.
         /// </summary>
         private void RemoveDuplicates(object sender, EventArgs e)
@@ -110,8 +168,17 @@ namespace CP2077SaveEditor.Views.Controls
                 ? _inventoryNames[ulong.Parse(currentContainerId)]
                 : $"Inventory {currentContainerId}";
 
-            var result = MessageBox.Show($"Choose duplicate removal scope:\n\nYes - Remove duplicates from ALL inventories\nNo - Remove duplicates from {currentInventoryName} only\nCancel - Abort",
-                "Remove Duplicates", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            // Display warning message including current limitations
+            var dialogMessage = $@"Choose duplicate removal scope:
+
+            Yes - Remove duplicates from ALL inventories
+            No - Remove duplicates from {currentInventoryName} only
+            Cancel - Abort
+
+            WARNING: This is a dangerous operation! For safety, this currently
+            only removes clothing duplicates (for wardrobe cleanup).";
+
+            var result = MessageBox.Show(dialogMessage, "Remove Duplicates", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
 
             if (result == DialogResult.Cancel)
             {
@@ -144,12 +211,15 @@ namespace CP2077SaveEditor.Views.Controls
                 {
                     var itemId = item.ItemInfo.ItemId.Id.ResolvedText;
 
-                    if (string.IsNullOrEmpty(itemId))
+                    // Only process items that are safe to remove duplicates from
+                    if (!IsSafeToRemoveDuplicates(item))
                     {
-                        continue; // Skip items without valid IDs
+                        continue;
                     }
 
-                    if (seenItems.Contains(itemId))
+                    var itemUniqueKey = GetItemUniqueKey(item);
+
+                    if (seenItems.Contains(itemUniqueKey))
                     {
                         // This is a duplicate, mark for removal
                         itemsToRemove.Add(item);
@@ -166,7 +236,7 @@ namespace CP2077SaveEditor.Views.Controls
                     }
                     else
                     {
-                        seenItems.Add(itemId);
+                        seenItems.Add(itemUniqueKey);
                     }
                 }
 
